@@ -35,7 +35,6 @@ class ClientThread(threading.Thread):
 
 
 class Master:
-
     def __init__(self, ip_addr, port):
         # create an INET, STREAMing socket
         master_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -71,6 +70,8 @@ class Node:
         self.ip_addr = ip_addr
         self.port = port
 
+    def __repr__(self):
+        return 'Node: ' + str(self.__dict__)
 
 if __name__ == "__main__":
 
@@ -82,7 +83,7 @@ if __name__ == "__main__":
 
     master.add_node([node1, node2, node3])
 
-    #while True:
-    #    master.handle_new_connection()
+    while True:
+        master.handle_new_connection()
 
 
