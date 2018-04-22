@@ -34,11 +34,11 @@ class DBConnection:
         pickled_node_address_list = recv_msg(master_socket)
         master_socket.close()
 
-        self.node_address_list = pickle.loads(pickled_node_address_list)
-        # print(self.node_address_list)
+        self.gate_node_address_list = pickle.loads(pickled_node_address_list)
+        # print(self.gate_node_address_list)
 
     def put(self, key, value):
-        node_address = self.key_to_nodes(key)[0]
+        node_address = self.gate_node_address_list[0] # assume connect to the first gate node
 
         # create an INET, STREAMing socket
         node_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -64,7 +64,7 @@ class DBConnection:
         #    return None
         #return max(retd_list, key=lambda x:x[1])[0] # return value with latest timestamp
 
-        node_address = self.key_to_nodes(key)[0]
+        node_address = self.gate_node_address_list[0] # assume connect to the first gate node
 
         # create an INET, STREAMing socket
         node_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -81,16 +81,7 @@ class DBConnection:
 
         node_socket.close()
 
-        # TODO: what to return?
         return result_msg
 
     def finalize(self):
         print("Bye!")
-
-    def key_to_nodes(self, key):
-        key_hashcode = int.from_bytes(hashlib.sha256(key.encode()).digest(), byteorder="little")
-        target_node_index = key_hashcode % len(self.node_address_list)
-        target_node_indices = [(target_node_index + i) % len(self.node_address_list) for i in range(K)]
-        target_node_address_list = [n for i, n in enumerate(self.node_address_list) if i in target_node_indices]
-        return target_node_address_list
-

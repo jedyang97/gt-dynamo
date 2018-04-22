@@ -30,6 +30,7 @@ class Node:
 
     def put(self, key, value):
         self.database[key] = (value, time.time())
+        return True
 
     def get(self, key):
         if key in self.database:
@@ -41,6 +42,15 @@ class Node:
         return self.database
 
     def put_to_nodes(self, node_address_list, key, value):
+        # majority count
+        success_count = 0
+        total_count = len(node_address_list)
+
+        if (self.ip_addr, self.port) in node_address_list:
+            if self.put(key, value):
+                success_count += 1
+            node_address_list.remove((self.ip_addr, self.port)) # avoid self sending/recving
+
         result_dict = defaultdict(bool)
         t_list = []
         for node_address in node_address_list:
@@ -50,16 +60,24 @@ class Node:
         for t in t_list:
             t.join(timeout=TIMEOUT)
 
-        # majority count
-        success_count = 0
         for node_address in node_address_list:
             if result_dict[node_address]:
                 success_count += 1
-        if 1.0 * success_count / len(node_address_list) > 0.5:
+        if 1.0 * success_count / total_count > 0.5:
             return True
         return False
 
     def get_from_nodes(self, node_address_list, key):
+        # majority count
+        total_count = len(node_address_list)
+        success_list = []
+
+        if (self.ip_addr, self.port) in node_address_list:
+            gate_node_value_ts = self.get(key)
+            if gate_node_value_ts[1] != None:
+                success_list.append(gate_node_value_ts)
+            node_address_list.remove((self.ip_addr, self.port)) # avoid self sending/recving
+
         result_dict = defaultdict(bool)
         t_list = []
         for node_address in node_address_list:
@@ -70,13 +88,14 @@ class Node:
             t.join(timeout=TIMEOUT)
 
         # majority count
-        success_list = []
         for node_address in node_address_list:
             if result_dict[node_address]:
                 success_list.append(result_dict[node_address])
-        if 1.0 * len(success_list) / len(node_address_list) > 0.5:
-            return success_list
-        return False
+        if 1.0 * len(success_list) / len(node_address_list) <= 0.5: # failed to get response from a majority of nodes
+            return None
+
+        # eventual consistency mechanism
+        return max(success_list, key=lambda x:x[1])[0] # return value with latest timestamp
 
     def update_node_ring(self, new_node_ring):
         self.node_ring = new_node_ring
@@ -84,7 +103,7 @@ class Node:
 
     def key_to_nodes(self, key):
         key_hashcode = int.from_bytes(hashlib.sha256(key.encode()).digest(), byteorder="little")
-        key_position = 1.0 * key_hashcode / (10 ** len(key_hashcode))
+        key_position = 1.0 * key_hashcode / (10 ** len(str(key_hashcode)))
 
         relevant_node_list = []
         if len(self.node_ring) == 0: # cannot find a node
@@ -189,31 +208,17 @@ class NodeClientThread(threading.Thread):
             print('NodeClientThread: CLIENT PUT received from %s:%s! Calculating list of target nodes' % self.address)
             node_address_list = self.node.key_to_nodes(msg[1])
             print('NodeClientThread: List of target node %s' % str(node_address_list))
-            if (self.node.ip_addr, self.node.port) in node_address_list:
-                print('NodeClientThread: List includes the current node, remove to avoid self sending/recving')
-                # TODO: How to incorperate this result to the result list?
-                self.node.put(msg[1], msg[2])
-                node_address_list.remove((self.node.ip_addr, self.node.port)) # avoid self sending/recving
-            print('NodeClientThread: Started sending to target nodes...')
-            put_result = self.node.put_to_nodes(self.node.key_to_nodes(msg[1]), msg[1], msg[2])
+            put_result = self.node.put_to_nodes(node_address_list, msg[1], msg[2])
 
             print('NodeClientThread: put_to_nodes returned: %s, sending this to %s:%s' % (str(put_result), self.address[0], self.address[1]))
             print('NodeClientThread: Database of %s:%s: %s' % (self.node.ip_addr, self.node.port, str(self.node.database)))
             send_msg(self.client_socket, pickle.dumps(put_result))
 
         elif msg[0] == HEADER_CLIENT_GET:
-#            print('NodeClientThread: CLIENT GET received from %s:%s! Getting key-value pair' % self.address)
-#            pickled_value_timestamp_msg = pickle.dumps(self.node.get(msg[1]))
-#            print('NodeClientThread: Successfully get key-value pair, sending value and timestamp to %s:%s' % self.address)
-#            send_msg(self.client_socket, pickled_value_timestamp_msg)
             print('NodeClientThread: CLIENT GET received from %s:%s! Calculating list of target nodes' % self.address)
             node_address_list = self.node.key_to_nodes(msg[1])
             print('NodeClientThread: List of target node %s' % str(node_address_list))
-            if (self.node.ip_addr, self.node.port) in node_address_list:
-                print('NodeClientThread: List includes the current node, remove to avoid self sending/recving')
-                # TODO: How to incorperate this result to the result list?
-                self.node.get(msg[1])
-                node_address_list.remove((self.node.ip_addr, self.node.port)) # avoid self sending/recving
+
             print('NodeClientThread: Started sending to target nodes...')
             get_result = self.node.get_from_nodes(self.node.key_to_nodes(msg[1]), msg[1])
 

@@ -6,6 +6,7 @@ import socket
 import threading
 import pickle
 import time
+import random
 
 from util import *
 from constant import *
@@ -126,8 +127,10 @@ class MasterClientThread(threading.Thread):
         # msg has correct format, decode header
         if msg[0] == HEADER_CLIENT_HELLO:
             print('MasterClientThread: CLIENT HELLO received from %s:%s! Sending node list to client' % self.address)
-            pickled_node_ring = pickle.dumps(self.master.node_ring)
-            send_msg(self.client_socket, pickled_node_ring)
+            node_addrs = list(self.master.node_ring.keys())
+            random.shuffle(node_addrs)
+            random_node_addrs = node_addrs[:G]
+            send_msg(self.client_socket, pickle.dumps(random_node_addrs))
         elif msg[0] == HEADER_NODE_ACTIVE:
             print('MasterClientThread: NODE ACTIVE received from %s:%s! Adding node to node ring' % self.address)
             node_address_to_fetch_from = self.master.add_node_address((msg[1], msg[2]))
