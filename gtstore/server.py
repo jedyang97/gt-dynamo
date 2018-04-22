@@ -55,7 +55,6 @@ class Master:
         '''
         Broadcast the node ring to all nodes.
         '''
-        # TODO
         t_list = []
         for node_address in self.node_ring.keys():
             t_list.append(MasterSendNodeRingThread(node_address, self))
@@ -63,6 +62,8 @@ class Master:
 
         for t in t_list:
             t.join()
+
+        print("\n\n\n\n\nBroadcasted node ring: " + str(self.node_ring) + "\n\n\n\n\n")
 
     def handle_new_connection(self):
         '''
@@ -129,10 +130,18 @@ class MasterClientThread(threading.Thread):
             node_address_to_fetch_from = self.master.add_node_address((msg[1], msg[2]))
             if node_address_to_fetch_from == None:
                 print('MasterClientThread: New node address added, sending OK to %s:%s' % self.address)
-                send_msg(self.client_socket, HEADER_OK.encode())
+                pickled_ok_msg = pickle.dumps((HEADER_OK, None, None))
+                send_msg(self.client_socket, pickled_ok_msg)
             else: # need to fetch database from next node
                 print('MasterClientThread: Need to fetch database from next node, sending its address to %s:%s' % self.address)
-                send_msg(self.client_socket, HEADER_OK.encode())
+                pickled_need_fetch_msg = pickle.dumps((HEADER_NEED_FETCH_DATABASE, node_address_to_fetch_from[0], node_address_to_fetch_from[1]))
+                send_msg(self.client_socket, pickled_need_fetch_msg)
+
+                ok_msg = recv_msg(self.client_socket).decode()
+                if ok_msg != HEADER_OK:
+                    print('[ERROR] MasterClientThread: ok msg header not received from %s:%s' % self.address)
+            self.master.broadcast_node_ring()
+
         else:
             print('[ERROR] MasterClientThread: msg header not recognized, end the connection from %s:%s' % self.address)
 
@@ -166,7 +175,7 @@ class Node:
         self.port = port
 
         self.database = dict()
-        self.node_ring = OrderedDict()
+        self.node_ring = dict()
 
     def put(self, key, value):
         self.database[key] = (value, time.time())
@@ -184,6 +193,12 @@ class Node:
         self.node_ring = new_node_ring
         print('Node: %s:%s updated node_ring: %s' % (self.ip_addr, self.port, str(self.node_ring)))
 
+    def key_to_nodes(self, key):
+        key_hashcode = int.from_bytes(hashlib.sha256(key.encode()).digest(), byteorder="little")
+        target_node_index = key_hashcode % len(self.node_address_list)
+        target_node_indices = [(target_node_index + i) % len(self.node_address_list) for i in range(K)]
+        target_node_address_list = [n for i, n in enumerate(self.node_address_list) if i in target_node_indices]
+        return target_node_address_list
 
     def notify_master_node_status(self, master_ip_addr, master_port, status):
         '''
@@ -199,10 +214,23 @@ class Node:
         pickled_msg = pickle.dumps(msg)
         send_msg(master_socket, pickled_msg)
 
-        # recv OK
-        OK_msg = recv_msg(master_socket).decode()
-        if OK_msg != HEADER_OK:
-            print('[ERROR] notify_master_node_status: OK not received')
+        # recv and decode message
+        pickled_msg = recv_msg(master_socket)
+        msg = pickle.loads(pickled_msg)
+
+        # msg should have the format (HEADER, ip_addr, port)
+        if not (type(msg) == tuple and len(msg) == 3):
+            print('[ERROR] notify_master_node_status: msg format not correct, end the connection from %s:%s' % self.address)
+            master_socket.close()
+            return
+
+        if msg[0] == HEADER_OK:
+            pass
+        elif msg[0] == HEADER_NEED_FETCH_DATABASE:
+            t = NodeGetDatabaseThread((msg[1], msg[2]), self)
+            t.start()
+            t.join()
+            send_msg(master_socket, HEADER_OK.encode())
 
         master_socket.close()
 
@@ -305,7 +333,7 @@ class NodeGetDatabaseThread(threading.Thread):
         pickled_msg = pickle.dumps(msg)
         send_msg(node_socket, pickled_msg)
 
-        # recv OK
+        # recv new database
         database_msg = pickle.loads(recv_msg(node_socket))
         if type(database_msg) != dict:
             print('[ERROR] NodeGetDatabaseThread: database got from %s:%s is not of type dict %s:%s' % self.target_node_address)
@@ -346,7 +374,6 @@ if __name__ == "__main__":
         t = NodeListenThread(node_list[-1])
         t.start()
         node_list[-1].notify_master_node_status('localhost', 4210, HEADER_NODE_ACTIVE)
-
 
     # don't return so that we can see console output
     mlt1.join()

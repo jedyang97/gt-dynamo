@@ -37,13 +37,6 @@ class DBConnection:
         self.node_address_list = pickle.loads(pickled_node_address_list)
         # print(self.node_address_list)
 
-    def key_to_nodes(self, key):
-        key_hashcode = int.from_bytes(hashlib.sha256(key.encode()).digest(), byteorder="little")
-        target_node_index = key_hashcode % len(self.node_address_list)
-        target_node_indices = [(target_node_index + i) % len(self.node_address_list) for i in range(K)]
-        target_node_address_list = [n for i, n in enumerate(self.node_address_list) if i in target_node_indices]
-        return target_node_address_list
-
     def put(self, key, value):
         return self._put_to_nodes(self.key_to_nodes(key), key, value)
 
