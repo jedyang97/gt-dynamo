@@ -10,6 +10,7 @@ import hashlib
 
 from util import *
 from constant import *
+from collections import defaultdict
 
 class Node:
     def __init__(self, ip_addr, port):
@@ -38,6 +39,44 @@ class Node:
 
     def get_database(self):
         return self.database
+
+    def put_to_nodes(self, node_address_list, key, value):
+        result_dict = defaultdict(bool)
+        t_list = []
+        for node_address in node_address_list:
+            t_list.append(PutToNodeThread(node_address, key, value, result_dict))
+            t_list[-1].start()
+
+        for t in t_list:
+            t.join(timeout=TIMEOUT)
+
+        # majority count
+        success_count = 0
+        for node_address in node_address_list:
+            if result_dict[node_address]:
+                success_count += 1
+        if 1.0 * success_count / len(node_address_list) > 0.5:
+            return True
+        return False
+
+    def get_from_nodes(self, node_address_list, key):
+        result_dict = defaultdict(bool)
+        t_list = []
+        for node_address in node_address_list:
+            t_list.append(GetFromNodeThread(node_address, key, result_dict))
+            t_list[-1].start()
+
+        for t in t_list:
+            t.join(timeout=TIMEOUT)
+
+        # majority count
+        success_list = []
+        for node_address in node_address_list:
+            if result_dict[node_address]:
+                success_list.append(result_dict[node_address])
+        if 1.0 * len(success_list) / len(node_address_list) > 0.5:
+            return success_list
+        return False
 
     def update_node_ring(self, new_node_ring):
         self.node_ring = new_node_ring
@@ -96,7 +135,7 @@ class Node:
 
         # msg should have the format (HEADER, ip_addr, port)
         if not (type(msg) == tuple and len(msg) == 3):
-            print('[ERROR] notify_master_node_status: msg format not correct, end the connection from %s:%s' % self.address)
+            print('[ERROR] notify_master_node_status: msg format not correct, end the connection from %s:%s' % (self.ip_addr, self.port))
             master_socket.close()
             return
 
@@ -147,17 +186,39 @@ class NodeClientThread(threading.Thread):
         # msg has correct format, decode header
         if msg[0] == HEADER_CLIENT_PUT:
             # time.sleep(10)
-            print('NodeClientThread: CLIENT PUT received from %s:%s! Puting key-value pair' % self.address)
-            self.node.put(msg[1], msg[2])
-            print('NodeClientThread: Successfully put key-value pair, sending OK to %s:%s' % self.address)
+            print('NodeClientThread: CLIENT PUT received from %s:%s! Calculating list of target nodes' % self.address)
+            node_address_list = self.node.key_to_nodes(msg[1])
+            print('NodeClientThread: List of target node %s' % str(node_address_list))
+            if (self.node.ip_addr, self.node.port) in node_address_list:
+                print('NodeClientThread: List includes the current node, remove to avoid self sending/recving')
+                # TODO: How to incorperate this result to the result list?
+                self.node.put(msg[1], msg[2])
+                node_address_list.remove((self.node.ip_addr, self.node.port)) # avoid self sending/recving
+            print('NodeClientThread: Started sending to target nodes...')
+            put_result = self.node.put_to_nodes(self.node.key_to_nodes(msg[1]), msg[1], msg[2])
+
+            print('NodeClientThread: put_to_nodes returned: %s, sending this to %s:%s' % (str(put_result), self.address[0], self.address[1]))
             print('NodeClientThread: Database of %s:%s: %s' % (self.node.ip_addr, self.node.port, str(self.node.database)))
-            send_msg(self.client_socket, HEADER_OK.encode())
+            send_msg(self.client_socket, pickle.dumps(put_result))
 
         elif msg[0] == HEADER_CLIENT_GET:
-            print('NodeClientThread: CLIENT GET received from %s:%s! Getting key-value pair' % self.address)
-            pickled_value_timestamp_msg = pickle.dumps(self.node.get(msg[1]))
-            print('NodeClientThread: Successfully get key-value pair, sending value and timestamp to %s:%s' % self.address)
-            send_msg(self.client_socket, pickled_value_timestamp_msg)
+#            print('NodeClientThread: CLIENT GET received from %s:%s! Getting key-value pair' % self.address)
+#            pickled_value_timestamp_msg = pickle.dumps(self.node.get(msg[1]))
+#            print('NodeClientThread: Successfully get key-value pair, sending value and timestamp to %s:%s' % self.address)
+#            send_msg(self.client_socket, pickled_value_timestamp_msg)
+            print('NodeClientThread: CLIENT GET received from %s:%s! Calculating list of target nodes' % self.address)
+            node_address_list = self.node.key_to_nodes(msg[1])
+            print('NodeClientThread: List of target node %s' % str(node_address_list))
+            if (self.node.ip_addr, self.node.port) in node_address_list:
+                print('NodeClientThread: List includes the current node, remove to avoid self sending/recving')
+                # TODO: How to incorperate this result to the result list?
+                self.node.get(msg[1])
+                node_address_list.remove((self.node.ip_addr, self.node.port)) # avoid self sending/recving
+            print('NodeClientThread: Started sending to target nodes...')
+            get_result = self.node.get_from_nodes(self.node.key_to_nodes(msg[1]), msg[1])
+
+            print('NodeClientThread: get_from_nodes returned: %s, sending this to %s:%s' % (str(get_result), self.address[0], self.address[1]))
+            send_msg(self.client_socket, pickle.dumps(get_result))
 
         elif msg[0] == HEADER_MASTER_UPDATE_NODE_RING:
             print('NodeClientThread: MASTER UPDATE NODE RING received from %s:%s! Updating local node ring' % self.address)
@@ -191,6 +252,60 @@ class NodeClientThread(threading.Thread):
         self.client_socket.close()
         print('NodeClientThread: Successfully ended the connection from %s:%s' % self.address)
         return
+
+class PutToNodeThread(threading.Thread):
+    def __init__(self, node_address, key, value, result_dict):
+        threading.Thread.__init__(self)
+        self.node_address = node_address
+        self.key = key
+        self.value = value
+        self.result_dict = result_dict
+
+    def run(self):
+        # create an INET, STREAMing socket
+        node_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # now connect to the node
+        node_socket.connect(self.node_address)
+
+        # send hand-shake msg
+        msg = (HEADER_NODE_PUT, self.key, self.value)
+        pickled_msg = pickle.dumps(msg)
+        send_msg(node_socket, pickled_msg)
+
+        # recv OK
+        OK_msg = recv_msg(node_socket).decode()
+        if OK_msg == HEADER_OK:
+            self.result_dict[self.node_address] = True
+
+        node_socket.close()
+
+class GetFromNodeThread(threading.Thread):
+    def __init__(self, node_address, key, result_dict):
+        threading.Thread.__init__(self)
+        self.node_address = node_address
+        self.key = key
+        self.result_dict = result_dict
+
+    def run(self):
+        # print('GetFromNodeThread: Get connected to %s:%s' % self.node_address)
+
+        # create an INET, STREAMing socket
+        node_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # now connect to the node
+        node_socket.connect(self.node_address)
+
+        # send hand-shake msg
+        msg = (HEADER_NODE_GET, self.key, None)
+        pickled_msg = pickle.dumps(msg)
+        send_msg(node_socket, pickled_msg)
+
+        # recv OK
+        value_ts_msg = pickle.loads(recv_msg(node_socket))
+        if type(value_ts_msg) == tuple and len(value_ts_msg) == 2 and value_ts_msg[1] != None:
+            self.result_dict[self.node_address] = value_ts_msg
+
+        node_socket.close()
+
 
 class NodeGetDatabaseThread(threading.Thread):
     def __init__(self, target_node_address, node):
