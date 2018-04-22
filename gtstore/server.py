@@ -5,6 +5,7 @@ import pickle
 from util import *
 from constant import *
 import time
+from collections import OrderedDict
 
 ''' Master related '''
 
@@ -24,7 +25,28 @@ class Master:
         self.node_ring = []
 
     def add_node_address(self, new_node_address):
+        '''
+        This function update the node ring and 
+        broadcast the new node ring to all nodes if necessary.
+        '''
+        old_node_ring = self.node_ring
         self.node_ring.append(new_node_address)
+        # TODO: better comparison 
+        if old_node_ring != self.node_ring:
+            self.broadcast_node_ring()
+
+    def broadcast_node_ring(self):
+        '''
+        Broadcast the node ring to all nodes.
+        '''
+        # TODO
+        t_list = []
+        for node_address in self.node_ring.keys():
+            t_list.append(MasterSendNodeRingThread(node_address, self))
+            t_list[-1].start()
+
+        for t in t_list:
+            t.join()
 
     def handle_new_connection(self):
         '''
@@ -35,6 +57,31 @@ class Master:
         # now do something with the client_socket
         mct = MasterClientThread(client_socket, address, self)
         mct.start()
+        mct.join() # master must handle connections sequentially
+
+class MasterSendNodeRingThread(threading.Thread):
+    def __init__(self, node_address, master):
+        threading.Thread.__init__(self)
+        self.node_address = node_address
+        self.master = master
+
+    def run(self):
+        # create an INET, STREAMing socket
+        node_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # now connect to the node
+        node_socket.connect(self.node_address)
+
+        # send node ring
+        msg = (HEADER_MASTER_UPDATE_NODE_RING, self.master.node_ring, None)
+        pickled_msg = pickle.dumps(msg)
+        send_msg(node_socket, pickled_msg)
+
+        # recv OK
+        OK_msg = recv_msg(node_socket).decode()
+        if OK_msg != HEADER_OK:
+            print('[ERROR] MasterSendNodeRingThread: OK not received from %s:%s' % self.node_address)
+
+        node_socket.close()
 
 class MasterClientThread(threading.Thread):
     def __init__(self, client_socket, address, master):
@@ -62,7 +109,7 @@ class MasterClientThread(threading.Thread):
             pickled_node_ring = pickle.dumps(self.master.node_ring)
             send_msg(self.client_socket, pickled_node_ring)
         elif msg[0] == HEADER_NODE_ACTIVE:
-            print('MasterClientThread: NODE ACTIVE received from %s:%s! Adding node to node list' % self.address)
+            print('MasterClientThread: NODE ACTIVE received from %s:%s! Adding node to node ring' % self.address)
             self.master.add_node_address((msg[1], msg[2]))
             print('MasterClientThread: New node address added, sending OK to %s:%s' % self.address)
             send_msg(self.client_socket, HEADER_OK.encode())
@@ -99,6 +146,7 @@ class Node:
         self.port = port
 
         self.database = dict()
+        self.node_ring = OrderedDict()
 
     def put(self, key, value):
         self.database[key] = (value, time.time())
@@ -108,6 +156,11 @@ class Node:
             return self.database[key]
         else:
             return (None, None)
+
+    def update_node_ring(self, new_node_ring):
+        self.node_ring = new_node_ring
+        print('Node: %s:%s updated node_ring: %s' % (self.ip_addr, self.port, str(self.node_ring)))
+
 
     def notify_master_node_status(self, master_ip_addr, master_port, status):
         '''
@@ -139,7 +192,7 @@ class Node:
         # now do something with the client_socket
         nct = NodeClientThread(client_socket, address, self)
         nct.start()
-        nct.join()
+        nct.join() # a node must handle connections sequentially
 
     def __repr__(self):
         return 'Node: ' + str(self.__dict__)
@@ -158,7 +211,7 @@ class NodeClientThread(threading.Thread):
         pickled_msg = recv_msg(self.client_socket)
         msg = pickle.loads(pickled_msg)
 
-        # msg should have the format (HEADER, key, value)
+        # msg should have the format (HEADER, data, data)
         if not (type(msg) == tuple and len(msg) == 3):
             print('[ERROR] NodeClientThread: msg format not correct, end the connection from %s:%s' % self.address)
             self.client_socket.close()
@@ -172,11 +225,25 @@ class NodeClientThread(threading.Thread):
             print('NodeClientThread: Successfully put key-value pair, sending OK to %s:%s' % self.address)
             print('NodeClientThread: Database of %s:%s: %s' % (self.node.ip_addr, self.node.port, str(self.node.database)))
             send_msg(self.client_socket, HEADER_OK.encode())
+
         elif msg[0] == HEADER_CLIENT_GET:
             print('NodeClientThread: CLIENT GET received from %s:%s! Getting key-value pair' % self.address)
             pickled_value_timestamp_msg = pickle.dumps(self.node.get(msg[1]))
             print('NodeClientThread: Successfully get key-value pair, sending value and timestamp to %s:%s' % self.address)
             send_msg(self.client_socket, pickled_value_timestamp_msg)
+
+        elif msg[0] == HEADER_MASTER_UPDATE_NODE_RING:
+            print('NodeClientThread: MASTER UPDATE NODE RING received from %s:%s! Updating local node ring' % self.address)
+            self.node.update_node_ring(msg[1])
+            print('NodeClientThread: Successfully updated node ring, sending OK to master %s:%s' % self.address)
+            send_msg(self.client_socket, HEADER_OK.encode())
+
+        elif msg[0] == HEADER_NODE_PUT:
+            pass
+
+        elif msg[0] == HEADER_NODE_GET:
+            pass
+
         else:
             print('[ERROR] NodeClientThread: msg header not recognized, end the connection from %s:%s' % self.address)
 
