@@ -81,7 +81,7 @@ class MasterListenThread(threading.Thread):
     def run(self):
         while True:
             self.master.handle_new_connection()
-        
+
 ''' Node related '''
 
 class Node:
@@ -115,7 +115,7 @@ class Node:
         OK_msg = recv_msg(master_socket).decode()
         if OK_msg != HEADER_OK:
             print('[ERROR] notify_master_node_status: OK not received')
-            
+
         master_socket.close()
 
     def handle_new_connection(self):
@@ -161,21 +161,12 @@ if __name__ == "__main__":
     mlt1.start()
 
     # create nodes
-    node1 = Node('localhost', 4211)
-    node2 = Node('localhost', 4212)
-    node3 = Node('localhost', 4213)
-    # each node should listen on its own thread
-    t1 = NodeListenThread(node1)
-    t2 = NodeListenThread(node2)
-    t3 = NodeListenThread(node3)
-    t1.start()
-    t2.start()
-    t3.start()
-
-    node1.notify_master_node_status('localhost', 4210, HEADER_NODE_ACTIVE)
-    node2.notify_master_node_status('localhost', 4210, HEADER_NODE_ACTIVE)
-    node3.notify_master_node_status('localhost', 4210, HEADER_NODE_ACTIVE)
+    node_list = []
+    for i in range(M):
+        node_list.append(Node('localhost', 4210 + i + 1))
+        t = NodeListenThread(node_list[-1])
+        t.start()
+        node_list[-1].notify_master_node_status('localhost', 4210, HEADER_NODE_ACTIVE)
 
     # don't return so that we can see console output
     mlt1.join()
-
