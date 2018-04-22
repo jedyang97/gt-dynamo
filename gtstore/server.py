@@ -4,7 +4,7 @@ import pickle
 
 from util import *
 from constant import *
-from datetime import datetime
+import time
 
 ''' Master related '''
 
@@ -98,10 +98,10 @@ class Node:
         self.ip_addr = ip_addr
         self.port = port
 
-        self.database = {}
+        self.database = dict()
 
     def put(self, key, value):
-        self.database[key] = (value, datetime.now())
+        self.database[key] = (value, time.time())
 
     def get(self, key):
         if key in self.database:
@@ -166,6 +166,7 @@ class NodeClientThread(threading.Thread):
 
         # msg has correct format, decode header
         if msg[0] == HEADER_CLIENT_PUT:
+            # time.sleep(10)
             print('NodeClientThread: CLIENT PUT received from %s:%s! Puting key-value pair' % self.address)
             self.node.put(msg[1], msg[2])
             print('NodeClientThread: Successfully put key-value pair, sending OK to %s:%s' % self.address)

@@ -9,13 +9,16 @@ from gtstore_api import *
 
 if __name__ == "__main__":
 
-    conn = DBConnection('localhost', 4210)
-    print(conn.key_to_nodes("HELLO WORLD!"))
-    print(conn.key_to_nodes("HELLO WORLD!!"))
-    print(conn.key_to_nodes("HELLO 4210!"))
-    print(conn.key_to_nodes("HELLO 4210"))
-    print(conn.key_to_nodes("HELLO"))
-    print(conn.key_to_nodes("HELLO1"))
+    conn = DBConnection('localhost', 4210) # Initialization
 
+    # print(conn.put("Mohan", "I love Ranjan!"))
+    # print(conn.put("Ranjan", "I love Mohan!"))
+    # print(conn.put("Han", "I hate Ranjan!"))
+    # print(conn.put("Jed", "I love Mohan!"))
 
-    conn.put("GT 4210", "GOOD LUCK!!")
+    print("Mohan's value: " + conn.get("Mohan"))
+    print("Ranjan's value: " + conn.get("Ranjan"))
+    print("Han's value: " + conn.get("Han"))
+    print("Jed's value: " + conn.get("Jed"))
+
+    conn.finalize()
