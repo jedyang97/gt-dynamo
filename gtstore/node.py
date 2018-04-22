@@ -45,10 +45,36 @@ class Node:
 
     def key_to_nodes(self, key):
         key_hashcode = int.from_bytes(hashlib.sha256(key.encode()).digest(), byteorder="little")
-        target_node_index = key_hashcode % len(self.node_address_list)
-        target_node_indices = [(target_node_index + i) % len(self.node_address_list) for i in range(K)]
-        target_node_address_list = [n for i, n in enumerate(self.node_address_list) if i in target_node_indices]
-        return target_node_address_list
+        key_position = 1.0 * key_hashcode / (10 ** len(key_hashcode))
+
+        relevant_node_list = []
+        if len(self.node_ring) == 0: # cannot find a node
+            return relevant_node_list
+
+        first_ring_pos_list = sorted(self.node_ring.items(), key=lambda x:x[1])
+        second_ring_post_list = [(ring_pos[0], ring_pos[1] + 1) for ring_pos in first_ring_pos_list]
+        ring_pos_list = first_ring_pos_list + second_ring_post_list # 2-layer ring
+        # interval_list = []
+        # for i in range(len(ring_pos_list) - 1): # inner ring
+        #     interval_list.append((ring_pos_list[i], ring_pos_list[i+1]))
+        # interval_list.append((ring_pos_list[-1], (ring_pos_list[0][0], ring_pos_list[0][1] + 1)))
+        # for i in range(len(ring_pos_list) - 1): # outer ring
+        #     interval_list.append(((ring_pos_list[i][0], ring_pos_list[i][1] + 1), (ring_pos_list[i+1][0], ring_pos_list[i+1][1] + 1)))
+        num_relevant_node = min(M, K)
+        i = 0
+        found_flag = False
+        while num_relevant_node > 0 and i < len(ring_pos_list):
+            if not found_flag:
+                if ring_pos_list[i][1] > key_position:
+                    found_flag = True
+                    relevant_node_list.append(ring_pos_list[i][0])
+                    num_relevant_node -= 1
+            else:
+                relevant_node_list.append(ring_pos_list[i][0])
+                num_relevant_node -= 1
+            i += 1
+
+        return relevant_node_list
 
     def notify_master_node_status(self, master_ip_addr, master_port, status):
         '''
