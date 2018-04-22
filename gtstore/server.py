@@ -157,6 +157,9 @@ class Node:
         else:
             return (None, None)
 
+    def get_database(self):
+        return self.database
+
     def update_node_ring(self, new_node_ring):
         self.node_ring = new_node_ring
         print('Node: %s:%s updated node_ring: %s' % (self.ip_addr, self.port, str(self.node_ring)))
@@ -239,10 +242,23 @@ class NodeClientThread(threading.Thread):
             send_msg(self.client_socket, HEADER_OK.encode())
 
         elif msg[0] == HEADER_NODE_PUT:
-            pass
+            print('NodeClientThread: NODE PUT received from %s:%s! Puting key-value pair' % self.address)
+            self.node.put(msg[1], msg[2])
+            print('NodeClientThread: Successfully put key-value pair, sending OK to %s:%s' % self.address)
+            print('NodeClientThread: Database of %s:%s: %s' % (self.node.ip_addr, self.node.port, str(self.node.database)))
+            send_msg(self.client_socket, HEADER_OK.encode())
 
         elif msg[0] == HEADER_NODE_GET:
-            pass
+            print('NodeClientThread: NODE GET received from %s:%s! Getting key-value pair' % self.address)
+            pickled_value_timestamp_msg = pickle.dumps(self.node.get(msg[1]))
+            print('NodeClientThread: Successfully get key-value pair, sending value and timestamp to %s:%s' % self.address)
+            send_msg(self.client_socket, pickled_value_timestamp_msg)
+
+        elif msg[0] == HEADER_NODE_GET_DATABASE:
+            print('NodeClientThread: NODE GET DATABASE received from %s:%s! Getting key-value pair' % self.address)
+            pickled_database_msg = pickle.dumps(self.node.get_database())
+            print('NodeClientThread: Successfully get database, sending database to %s:%s' % self.address)
+            send_msg(self.client_socket, pickled_database_msg)
 
         else:
             print('[ERROR] NodeClientThread: msg header not recognized, end the connection from %s:%s' % self.address)
@@ -251,6 +267,41 @@ class NodeClientThread(threading.Thread):
         self.client_socket.close()
         print('NodeClientThread: Successfully ended the connection from %s:%s' % self.address)
         return
+
+class NodeGetDatabaseThread(threading.Thread):
+    def __init__(self, target_node_address, node):
+        threading.Thread.__init__(self)
+        self.target_node_address = target_node_address
+        self.node = node
+
+    def run(self):
+        # create an INET, STREAMing socket
+        node_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # now connect to the node
+        node_socket.connect(self.target_node_address)
+
+        # send get database msg
+        msg = (HEADER_NODE_GET_DATABASE, None, None)
+        pickled_msg = pickle.dumps(msg)
+        send_msg(node_socket, pickled_msg)
+
+        # recv OK
+        database_msg = pickle.loads(recv_msg(node_socket))
+        if type(database_msg) != dict:
+            print('[ERROR] NodeGetDatabaseThread: database got from %s:%s is not of type dict %s:%s' % self.target_node_address)
+
+        # Merge the fetched database with current database
+        self.merge_database(database_msg)
+
+        node_socket.close()
+
+    def merge_database(self, new_database):
+        common_keys = set(self.node.database.keys()) & set(new_database.keys())
+        common_dict = {common_key: max([self.node.database[common_key], new_database[common_key]], key=lambda x: x[1]) for common_key in common_keys} # choose value with latest timestamp
+
+        self.node.database.update(new_database)
+        self.node.database.update(common_dict)
+        print('NodeGetDatabaseThread: Successfully merged database from %s:%s New database: %s' % (self.target_node_address[0], self.target_node_address[1], str(self.node.database)))
 
 class NodeListenThread(threading.Thread):
     def __init__(self, node):
