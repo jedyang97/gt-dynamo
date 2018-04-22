@@ -1,2 +1,3 @@
 *.swp
 gtstore/__pycache__/
+*.pyc
