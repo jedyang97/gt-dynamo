@@ -5,7 +5,6 @@ import pickle
 from util import *
 from constant import *
 import time
-from collections import OrderedDict
 
 ''' Master related '''
 
@@ -22,18 +21,35 @@ class Master:
         self.ip_addr = ip_addr
         self.port = port
 
-        self.node_ring = []
+        self.node_ring = dict()
 
     def add_node_address(self, new_node_address):
         '''
         This function update the node ring and 
         broadcast the new node ring to all nodes if necessary.
         '''
-        old_node_ring = self.node_ring
-        self.node_ring.append(new_node_address)
-        # TODO: better comparison 
-        if old_node_ring != self.node_ring:
-            self.broadcast_node_ring()
+        # old_node_ring_items = set(self.node_ring.items())
+        # self.node_ring.update(new_node_address)
+        # # TODO: better comparison
+        # if old_node_ring != self.node_ring:
+        #     self.broadcast_node_ring()
+        if new_node_address not in self.node_ring:
+            if len(self.node_ring) == 0:
+                self.node_ring[new_node_address] = 0
+                return None
+            ring_pos_list = sorted(self.node_ring.items(), key=lambda x:x[1])
+            interval_list = []
+            for i in range(len(ring_pos_list) - 1):
+                interval_list.append((ring_pos_list[i], ring_pos_list[i+1]))
+            interval_list.append((ring_pos_list[-1], (ring_pos_list[0][0], ring_pos_list[0][1] + 1)))
+            if len(interval_list) == 1: # if only one interval exists
+                self.node_ring[new_node_address] = (interval_list[0][0][1] + 0.5) % 1
+                node_address_to_copy = interval_list[0][1][0] # node after the inserted node
+            else: # general case
+                interval_list.sort(key=lambda x:- (x[1][1] - x[0][1]))
+                self.node_ring[new_node_address] = (1.0 * (interval_list[0][0][1] + interval_list[0][1][1]) / 2) % 1
+                node_address_to_copy = interval_list[0][1][0] # node after the inserted node
+            return node_address_to_copy
 
     def broadcast_node_ring(self):
         '''
@@ -110,9 +126,13 @@ class MasterClientThread(threading.Thread):
             send_msg(self.client_socket, pickled_node_ring)
         elif msg[0] == HEADER_NODE_ACTIVE:
             print('MasterClientThread: NODE ACTIVE received from %s:%s! Adding node to node ring' % self.address)
-            self.master.add_node_address((msg[1], msg[2]))
-            print('MasterClientThread: New node address added, sending OK to %s:%s' % self.address)
-            send_msg(self.client_socket, HEADER_OK.encode())
+            node_address_to_fetch_from = self.master.add_node_address((msg[1], msg[2]))
+            if node_address_to_fetch_from == None:
+                print('MasterClientThread: New node address added, sending OK to %s:%s' % self.address)
+                send_msg(self.client_socket, HEADER_OK.encode())
+            else: # need to fetch database from next node
+                print('MasterClientThread: Need to fetch database from next node, sending its address to %s:%s' % self.address)
+                send_msg(self.client_socket, HEADER_OK.encode())
         else:
             print('[ERROR] MasterClientThread: msg header not recognized, end the connection from %s:%s' % self.address)
 
