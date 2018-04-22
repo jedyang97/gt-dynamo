@@ -4,6 +4,7 @@ import pickle
 
 from util import *
 from constant import *
+from datetime import datetime
 
 ''' Master related '''
 
@@ -97,6 +98,17 @@ class Node:
         self.ip_addr = ip_addr
         self.port = port
 
+        self.database = {}
+
+    def put(self, key, value):
+        self.database[key] = (value, datetime.now())
+
+    def get(self, key):
+        if key in self.database:
+            return self.database[key]
+        else:
+            return (None, None)
+
     def notify_master_node_status(self, master_ip_addr, master_port, status):
         '''
         Notify master the status of this node.
@@ -125,8 +137,9 @@ class Node:
         # accept connections from outside
         (client_socket, address) = self.socket.accept()
         # now do something with the client_socket
-        nct = MasterClientThread(client_socket, address, self)
+        nct = NodeClientThread(client_socket, address, self)
         nct.start()
+        nct.join()
 
     def __repr__(self):
         return 'Node: ' + str(self.__dict__)
@@ -139,10 +152,37 @@ class NodeClientThread(threading.Thread):
         self.node = node
 
     def run(self):
-        print('MasterClientThread: Get connected from %s:%s' % self.address)
+        print('NodeClientThread: Get connected from %s:%s' % self.address)
 
-        # wait for the HELLO message
-        msg = recv_msg(self.client_socket)
+        # recv and decode message
+        pickled_msg = recv_msg(self.client_socket)
+        msg = pickle.loads(pickled_msg)
+
+        # msg should have the format (HEADER, key, value)
+        if not (type(msg) == tuple and len(msg) == 3):
+            print('[ERROR] NodeClientThread: msg format not correct, end the connection from %s:%s' % self.address)
+            self.client_socket.close()
+            return
+
+        # msg has correct format, decode header
+        if msg[0] == HEADER_CLIENT_PUT:
+            print('NodeClientThread: CLIENT PUT received from %s:%s! Puting key-value pair' % self.address)
+            self.node.put(msg[1], msg[2])
+            print('NodeClientThread: Successfully put key-value pair, sending OK to %s:%s' % self.address)
+            print('NodeClientThread: Database of %s:%s: %s' % (self.node.ip_addr, self.node.port, str(self.node.database)))
+            send_msg(self.client_socket, HEADER_OK.encode())
+        elif msg[0] == HEADER_CLIENT_GET:
+            print('NodeClientThread: CLIENT GET received from %s:%s! Getting key-value pair' % self.address)
+            pickled_value_timestamp_msg = pickle.dumps(self.node.get(msg[1]))
+            print('NodeClientThread: Successfully get key-value pair, sending value and timestamp to %s:%s' % self.address)
+            send_msg(self.client_socket, pickled_value_timestamp_msg)
+        else:
+            print('[ERROR] NodeClientThread: msg header not recognized, end the connection from %s:%s' % self.address)
+
+
+        self.client_socket.close()
+        print('NodeClientThread: Successfully ended the connection from %s:%s' % self.address)
+        return
 
 class NodeListenThread(threading.Thread):
     def __init__(self, node):
@@ -167,6 +207,7 @@ if __name__ == "__main__":
         t = NodeListenThread(node_list[-1])
         t.start()
         node_list[-1].notify_master_node_status('localhost', 4210, HEADER_NODE_ACTIVE)
+
 
     # don't return so that we can see console output
     mlt1.join()

@@ -16,3 +16,6 @@ if __name__ == "__main__":
     print(conn.key_to_nodes("HELLO 4210"))
     print(conn.key_to_nodes("HELLO"))
     print(conn.key_to_nodes("HELLO1"))
+
+
+    conn.put("GT 4210", "GOOD LUCK!!")
