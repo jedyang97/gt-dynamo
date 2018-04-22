@@ -21,10 +21,10 @@ class Master:
         self.ip_addr = ip_addr
         self.port = port
 
-        self.node_address_list = []
+        self.node_ring = []
 
     def add_node_address(self, new_node_address):
-        self.node_address_list.append(new_node_address)
+        self.node_ring.append(new_node_address)
 
     def handle_new_connection(self):
         '''
@@ -59,8 +59,8 @@ class MasterClientThread(threading.Thread):
         # msg has correct format, decode header
         if msg[0] == HEADER_CLIENT_HELLO:
             print('MasterClientThread: CLIENT HELLO received from %s:%s! Sending node list to client' % self.address)
-            pickled_node_address_list = pickle.dumps(self.master.node_address_list)
-            send_msg(self.client_socket, pickled_node_address_list)
+            pickled_node_ring = pickle.dumps(self.master.node_ring)
+            send_msg(self.client_socket, pickled_node_ring)
         elif msg[0] == HEADER_NODE_ACTIVE:
             print('MasterClientThread: NODE ACTIVE received from %s:%s! Adding node to node list' % self.address)
             self.master.add_node_address((msg[1], msg[2]))
