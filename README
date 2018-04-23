@@ -1,0 +1,12 @@
+To run our code, simply do:
+
+cd gtstore/
+
+python3 server.py
+
+python3 server_extra.py
+
+python3 client.py
+
+python3 client_extra.py
+

@@ -7,6 +7,7 @@ from constant import *
 from server import *
 from gtstore_api import *
 
+# client.py
 if __name__ == "__main__":
 
     conn = DBConnection('localhost', 4210) # Initialization
