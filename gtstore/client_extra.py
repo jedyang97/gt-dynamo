@@ -11,9 +11,9 @@ if __name__ == "__main__":
 
     conn = DBConnection('localhost', 4210) # Initialization
 
-    print("Mohan's value: " + str(conn.get("Mohan")))
-    print("Ranjan's value: " + str(conn.get("Ranjan")))
-    print("Han's value: " + str(conn.get("Han")))
-    print("Jed's value: " + str(conn.get("Jed")))
+    print("Jed's cart: " + str(conn.get("Jed's cart")))
+    print("Han's cart: " + str(conn.get("Han's cart")))
+    print("Yang's cart: " + str(conn.get("Yang's cart")))
+    print("Jianing's cart: " + str(conn.get("Jianing's cart")))
 
     conn.finalize()

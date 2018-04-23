@@ -8,6 +8,7 @@ from constant import *
 from master import *
 from node import *
 
+# server.py
 if __name__ == "__main__":
 
     # create master
